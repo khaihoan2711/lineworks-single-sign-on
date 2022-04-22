@@ -1,0 +1,10 @@
+version = 0.1
+[khaihoan2711]
+[khaihoan2711.deploy]
+[khaihoan2711.deploy.parameters]
+stack_name = "CICD"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1ntxgcpg11wlz"
+s3_prefix = "CICD"
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_IAM"
+image_repositories = []
