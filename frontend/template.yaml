@@ -1,0 +1,148 @@
+##########################################################################
+#   AWS INFRASTRUCTURES DEPLOY COMMANDS:
+#   aws cloudformation deploy --template-file <path to yaml template> --stack-name <my-stack-name> --parameter-overrides Key1=Value1 Key2=Value2 --tags Key1=Value1 Key2=Value2
+#   NOTE: All parameter values must be in lower cases for resource naming conventions
+#
+#   Example:
+#     DEV:   $aws cloudformation deploy  --template-file template.yaml --stack-name angular-dev-frontend --parameter-overrides Env=dev
+#     TEST:  $aws cloudformation deploy  --template-file template.yaml --stack-name angular-test-frontend --parameter-overrides Env=test
+#     STAGE: $aws cloudformation deploy  --template-file template.yaml --stack-name angular-stage-frontend --parameter-overrides Env=stage
+#     PROD:  $aws cloudformation deploy  --template-file template.yaml --stack-name angular-prod-frontend --parameter-overrides Env=prod
+#
+#   BUILD COMMANDS:
+#   $cd fontend\SkmWebApp
+#   $npm run build
+#   $aws s3 sync --acl bucket-owner-full-control <source> <target s3 uri>
+##########################################################################
+
+Parameters:
+
+  ProjectId:
+    Description: Setting project ID for consistency naming resources, descriptions, tags...
+    Type: String
+    Default: angular
+    AllowedValues:
+      - angular
+      
+  Env:
+    Description: Config working environment
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - test
+      - stage
+      - prod
+
+
+Resources:
+
+  ##########################################################################
+  #   HOSTING BUCKET
+  ##########################################################################
+  HostingBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub '${ProjectId}-${Env}-frontend'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Suspended
+      Tags:
+        - Key: ProjectId
+          Value: !Ref ProjectId
+        - Key: Env
+          Value: !Ref Env
+
+  HostingBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref HostingBucket
+      PolicyDocument:
+        Statement:
+          - Sid: 1
+            Action:
+              - 's3:GetObject'
+            Effect: Allow
+            Resource: !Join
+              - ''
+              - - !GetAtt HostingBucket.Arn
+                - /*
+            Principal:
+              AWS:
+                - !Join
+                  - ' '
+                  - - 'arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity'
+                    - !Ref AccessIdentityFrontEnd
+
+
+  ##########################################################################
+  #   CLOUD FRONT ACCESS IDENTITY - For Hosting bucket
+  ##########################################################################
+  AccessIdentityFrontEnd:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Join 
+          - ''
+          - - 'access-identity-for-'
+            - !Ref HostingBucket
+
+
+  ##########################################################################
+  #   CLOUD FRONT DISTRIBUTION FOR WEBAPP
+  ##########################################################################
+  CloudFrontDistFrontend:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        HttpVersion: http2
+        Origins:
+          # This origin for running current version
+          - DomainName: !GetAtt HostingBucket.RegionalDomainName
+            Id: OriginId-frontend
+            OriginPath: /dist-v1
+            S3OriginConfig:
+              OriginAccessIdentity: !Join
+                - ''
+                - - 'origin-access-identity/cloudfront/'
+                  - !Ref AccessIdentityFrontEnd
+        Enabled: true
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+          TargetOriginId: OriginId-frontend
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: redirect-to-https
+        
+        PriceClass: PriceClass_All
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ErrorCachingMinTTL: 10
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 403
+            ErrorCachingMinTTL: 10
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+      Tags:
+        - Key: ProjectId
+          Value: !Ref ProjectId
+        - Key: Env
+          Value: !Ref Env
+
+Outputs:
+  CloudFrontDomain:
+    Description: cloudfront URL for webapp
+    Value: !GetAtt CloudFrontDistFrontend.DomainName
+  HostingBucket:
+    Description: S3 bucket for hosting frontend webapp
+    Value: !Ref HostingBucket
